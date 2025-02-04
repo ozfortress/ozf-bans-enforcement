@@ -1,0 +1,13 @@
+"Phrases"
+{
+    "ozf_bans_warn"
+    {
+        "#format" "{1:s}"
+        "en"    " - Alert! {1} is banned from ozfortress matches."
+    }
+    
+    "ozf_bans_kicked"
+    {
+        "en"    "You are banned from ozfortress matches, and have been kicked from the server for failing the ban check"
+    }
+}
