@@ -19,7 +19,7 @@ public Plugin myinfo =
     name = "ozfortress Bans Enforcement",
     author = "ozfortress",
     description = "Enforces bans from ozfortress on any server",
-    version = "1.0.0",
+    version = "1.0.1",
     url = "https://github.com/ozfortress/ozf-bans-enforcement",
 };
 
