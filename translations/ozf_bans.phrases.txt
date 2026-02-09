@@ -10,4 +10,9 @@
     {
         "en"    "You are banned from ozfortress matches, and have been kicked from the server for failing the ban check"
     }
+    "ozf_bans_comms_warn"
+    {
+        "#format" "{1:s}"
+        "en"    " - Heads up {1}, you are currently comms-banned from ozfortress matches in-game. If you believe this is in error, please create a support ticket on the ozfortress Discord."
+    }
 }
