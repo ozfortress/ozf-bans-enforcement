@@ -20,7 +20,7 @@ public Plugin myinfo =
     name        = "ozfortress Bans Enforcement",
     author      = "ozfortress",
     description = "Enforces bans, including comms bans, from ozfortress on any server",
-    version     = "2.0.0",
+    version     = "2.0.1",
     url         = "https://github.com/ozfortress/ozf-bans-enforcement",
 };
 
@@ -239,7 +239,7 @@ bool IsClientInBanList(int client, bool checkComms = false)
         Format(table, sizeof(table), "sb_bans");
     }
     GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
-    Format(sQuery, sizeof(sQuery), "SELECT * FROM `%s` WHERE `authid` = '%s'", table, steamid);
+    Format(sQuery, sizeof(sQuery), "SELECT * FROM `%s` WHERE `authid` = '%s' AND `RemoveType` IS NULL AND (`ends` = `created` OR `ends` > UNIX_TIMESTAMP())", table, steamid);
     DBResultSet result = SQL_Query(g_dbHandle, sQuery);
     if (result == INVALID_HANDLE)
     {
