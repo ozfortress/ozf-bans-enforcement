@@ -20,7 +20,7 @@ public Plugin myinfo =
     name        = "ozfortress Bans Enforcement",
     author      = "ozfortress",
     description = "Enforces bans, including comms bans, from ozfortress on any server",
-    version     = "2.0.2",
+    version     = "2.0.3",
     url         = "https://github.com/ozfortress/ozf-bans-enforcement",
 };
 
@@ -183,14 +183,15 @@ public void OnClientDisconnect(int client)
 
 void IsClientBannedCallback(Database db, DBResultSet results, const char[] error, any data)
 {
+    // LogMessage("Received database query result for client ban check, comms: %d", data != 0);
     if (error[0] != '\0')
     {
-        LogError("ozf-bans: Database query error: %s", error);
+        // LogError("ozf-bans: Database query error: %s", error);
         return;
     }  
     if (results == null)
     {
-        LogError("ozf-bans: Database query returned no results.");
+        // LogError("ozf-bans: Database query returned no results.");
         return;
     }
     bool checkComms = data != 0;
@@ -199,35 +200,42 @@ void IsClientBannedCallback(Database db, DBResultSet results, const char[] error
     if (!success)
     {
         if (results.MoreRows == false || results.RowCount == 0){
+            // LogMessage("No ban found for client.");
             return;    // No ban found
         }
     }
     int authidField;
     results.FieldNameToNum("authid", authidField); // Shouldn't fail, no need to check
-    int authidLength;
-    authidLength = results.FetchSize(authidField);
+    // int authidLength;
+    // authidLength = results.FetchSize(authidField); // STRINGS ARE NOT REAAAAAAAAALLLL
     char authid[MAX_AUTHID_LENGTH];
-    results.FetchString(authidField, authid, authidLength);
+    results.FetchString(authidField, authid, MAX_AUTHID_LENGTH);
 
+    // LogMessage("SANITY CHECK: authid from db: %s", authid);
     for (int i = 1; i <= MaxClients; i++)
     {
         if (!IsClientConnected(i))
         {
+            // LogMessage("Client %d is not connected, skipping", i);
             continue;
         }
         char clientAuth[64];
         bool gotAuth = GetClientAuthId(i, AuthId_Steam2, clientAuth, sizeof(clientAuth));
         if (!gotAuth)
         {
+            // LogMessage("Client %d has no authid yet, skipping", i);
             continue;    // No steam id, wait for auth
         }
+        // LogMessage("Comparing client %d authid %s with ban authid %s", i, clientAuth, authid);  
         if (StrEqual(authid, clientAuth))
         {
+            // LogMessage("Client %d matches ban authid %s, applying ban", i, authid);
             if (checkComms)
             {
                 // last minute: Check if the convar is still enabled
                 if (!GetConVarBool(g_bEnforceComms))
                 {
+                    // LogMessage("Comms enforcement disabled, skipping client %d", i);
                     return;
                 }
                 BaseComm_SetClientMute(i, true);
@@ -236,6 +244,7 @@ void IsClientBannedCallback(Database db, DBResultSet results, const char[] error
                 GetClientName(i, sClientName, sizeof(sClientName));
                 if (GetConVarBool(g_bWarn) && !g_HasCommsWarned[i])
                 {
+                    // LogMessage("Muting client %d (%s) for comms ban", i, sClientName);
                     PrintToChat(i, "%t", "ozf_bans_comms_warn", sClientName);
                     g_HasCommsWarned[i] = true;
                 }
@@ -244,10 +253,12 @@ void IsClientBannedCallback(Database db, DBResultSet results, const char[] error
                 // last minute: Check if the convar is still enabled
                 if (!GetConVarBool(g_bEnforce))
                 {
+                    // LogMessage("Ban enforcement disabled, skipping client %d", i);
                     return;
                 }
                 char sClientName[64];
                 GetClientName(i, sClientName, sizeof(sClientName));
+                // LogMessage("Kicking client %d (%s) for ban", i, sClientName);
                 KickClient(i, "%t", "ozf_bans_kicked");
                 if (GetConVarBool(g_bWarn))
                 {
@@ -263,6 +274,7 @@ void CheckIfClientBannedOrMuted(int client, bool checkComms = false)
     char sQuery[512];
     char steamid[32];
     char table[16];
+    LogMessage("Checking bans for client %d, comms: %d", client, checkComms);
     if (checkComms)
     {
         Format(table, sizeof(table), "sb_comms");
