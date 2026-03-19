@@ -20,7 +20,7 @@ public Plugin myinfo =
     name        = "ozfortress Bans Enforcement",
     author      = "ozfortress",
     description = "Enforces bans, including comms bans, from ozfortress on any server",
-    version     = "2.0.1",
+    version     = "2.0.2",
     url         = "https://github.com/ozfortress/ozf-bans-enforcement",
 };
 
@@ -68,12 +68,12 @@ public void ConVarChanged(ConVar convar, const char[] oldValue, const char[] new
     {
         if (StrEqual(newValue, "1"))
         {
-            // loop all players
+            // check only muted players
             for (int i = 1; i <= MaxClients; i++)
             {
                 if (IsClientConnected(i))
                 {
-                    WarnClient(i);
+                    CheckIfClientBannedOrMuted(i, true);
                 }
             }
         }
@@ -101,7 +101,7 @@ public void ConVarChanged(ConVar convar, const char[] oldValue, const char[] new
                     {
                         continue;    // No steam id, wait for auth
                     }
-                    HandleBanAction(i, auth);
+                    CheckIfClientBannedOrMuted(i, false);
                 }
             }
         }
@@ -121,13 +121,7 @@ public void ConVarChanged(ConVar convar, const char[] oldValue, const char[] new
                     {
                         continue;    // No steam id, wait for auth
                     }
-                    if (IsClientCommsMuted(i))
-                    {
-                        char sClientName[64];
-                        GetClientName(i, sClientName, sizeof(sClientName));
-                        // PrintToChat(i, "%t", "ozf_bans_comms_kicked", sClientName);
-                        HandleBanAction(i, auth);
-                    }
+                    CheckIfClientBannedOrMuted(i, true);
                 }
             }
         }
@@ -161,30 +155,6 @@ public void OnClientPutInServer(int client)
     HandleBanAction(client, auth);
 }
 
-public void WarnClient(int client)
-{
-    if (IsClientBanned(client))
-    {
-        if (GetConVarBool(g_bWarn) && !g_HasWarned[client] && !GetConVarBool(g_bEnforce))
-        {
-            g_HasWarned[client] = true;
-            char sClientName[64];
-            GetClientName(client, sClientName, sizeof(sClientName));
-            PrintToChatAll("%t", "ozf_bans_warn", sClientName);
-        }
-    }
-    if (IsClientCommsMuted(client))
-    {
-        if (GetConVarBool(g_bWarn) && !g_HasWarned[client] && !GetConVarBool(g_bEnforceComms))
-        {
-            g_HasCommsWarned[client] = true;
-            char sClientName[64];
-            GetClientName(client, sClientName, sizeof(sClientName));
-            PrintToChat(client, "%t", "ozf_bans_comms_warn", sClientName);
-        }
-    }
-}
-
 public void HandleBanAction(int client, const char[] auth)
 {
     if (IsFakeClient(client))
@@ -195,84 +165,111 @@ public void HandleBanAction(int client, const char[] auth)
     {
         return;    // No steam id, wait for put in server
     }
-    WarnClient(client);
     if (GetConVarBool(g_bEnforce))
     {
-        if (IsClientBanned(client))
-        {
-            char sClientName[64];
-            GetClientName(client, sClientName, sizeof(sClientName));
-            KickClient(client, "%t", "ozf_bans_kicked");
-            return;    // No need to check comms if we're already kicking
-        }
+        CheckIfClientBannedOrMuted(client, false);
     }
     if (GetConVarBool(g_bEnforceComms))
     {
-        if (IsClientCommsMuted(client))
-        {
-            char sClientName[64];
-            GetClientName(client, sClientName, sizeof(sClientName));
-            BaseComm_SetClientMute(client, true);
-            BaseComm_SetClientGag(client, true);
-            // PrintToChat(client, "%t", "ozf_bans_comms_warn", sClientName);
-        }
+        CheckIfClientBannedOrMuted(client, true);
     }
 }
 
 public void OnClientDisconnect(int client)
 {
-    // Client disconnected, clear any warnings
     g_HasWarned[client]      = false;
     g_HasCommsWarned[client] = false;
 }
 
-bool IsClientInBanList(int client, bool checkComms = false)
+void IsClientBannedCallback(Database db, DBResultSet results, const char[] error, any data)
+{
+    if (error[0] != '\0')
+    {
+        LogError("ozf-bans: Database query error: %s", error);
+        return;
+    }  
+    if (results == null)
+    {
+        LogError("ozf-bans: Database query returned no results.");
+        return;
+    }
+    bool checkComms = data != 0;
+
+    bool success = results.FetchRow();
+    if (!success)
+    {
+        if (results.MoreRows == false || results.RowCount == 0){
+            return;    // No ban found
+        }
+    }
+    int authidField;
+    results.FieldNameToNum("authid", authidField); // Shouldn't fail, no need to check
+    int authidLength;
+    authidLength = results.FetchSize(authidField);
+    char authid[MAX_AUTHID_LENGTH];
+    results.FetchString(authidField, authid, authidLength);
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsClientConnected(i))
+        {
+            continue;
+        }
+        char clientAuth[64];
+        bool gotAuth = GetClientAuthId(i, AuthId_Steam2, clientAuth, sizeof(clientAuth));
+        if (!gotAuth)
+        {
+            continue;    // No steam id, wait for auth
+        }
+        if (StrEqual(authid, clientAuth))
+        {
+            if (checkComms)
+            {
+                // last minute: Check if the convar is still enabled
+                if (!GetConVarBool(g_bEnforceComms))
+                {
+                    return;
+                }
+                BaseComm_SetClientMute(i, true);
+                BaseComm_SetClientGag(i, true);
+                char sClientName[64];
+                GetClientName(i, sClientName, sizeof(sClientName));
+                if (GetConVarBool(g_bWarn) && !g_HasCommsWarned[i])
+                {
+                    PrintToChat(i, "%t", "ozf_bans_comms_warn", sClientName);
+                    g_HasCommsWarned[i] = true;
+                }
+            }
+            else {
+                // last minute: Check if the convar is still enabled
+                if (!GetConVarBool(g_bEnforce))
+                {
+                    return;
+                }
+                char sClientName[64];
+                GetClientName(i, sClientName, sizeof(sClientName));
+                KickClient(i, "%t", "ozf_bans_kicked");
+                if (GetConVarBool(g_bWarn))
+                {
+                    PrintToChatAll("%t", "ozf_bans_warn", sClientName);
+                }
+            }
+        }
+    }
+}
+
+void CheckIfClientBannedOrMuted(int client, bool checkComms = false)
 {
     char sQuery[512];
     char steamid[32];
     char table[16];
     if (checkComms)
     {
-        Format(table, sizeof(table), "sb_mutes");
-    }
-    else {
+        Format(table, sizeof(table), "sb_comms");
+    } else {
         Format(table, sizeof(table), "sb_bans");
     }
     GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
     Format(sQuery, sizeof(sQuery), "SELECT * FROM `%s` WHERE `authid` = '%s' AND `RemoveType` IS NULL AND (`ends` = `created` OR `ends` > UNIX_TIMESTAMP())", table, steamid);
-    DBResultSet result = SQL_Query(g_dbHandle, sQuery);
-    if (result == INVALID_HANDLE)
-    {
-        CloseHandle(result);
-        return false;
-    }
-    bool success = SQL_FetchRow(result);
-    if (!success)
-    {
-        CloseHandle(result);
-        return false;
-    }
-    if (success)
-    {
-        if (SQL_GetRowCount(result) > 0)
-        {
-            CloseHandle(result);
-            return true;
-        }
-        else {
-            CloseHandle(result);
-            return false;
-        }
-    }
-    return false;
-}
-
-bool IsClientBanned(int client)
-{
-    return IsClientInBanList(client, false);
-}
-
-bool IsClientCommsMuted(int client)
-{
-    return IsClientInBanList(client, true);
+    g_dbHandle.Query(IsClientBannedCallback, sQuery, checkComms, DBPrio_Normal);
 }
